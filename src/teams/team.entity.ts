@@ -4,8 +4,10 @@ import {
   Column,
   CreateDateColumn,
   ManyToOne,
+  OneToMany,
 } from 'typeorm';
 import { User } from '../users/user.entity';
+import { TournamentRegistration } from '../tournaments/entities/tournament-registration.entity';
 
 @Entity()
 export class Team {
@@ -26,4 +28,7 @@ export class Team {
 
   @CreateDateColumn()
   createdAt: Date;
+
+  @OneToMany(() => TournamentRegistration, (registration) => registration.team)
+  tournamentRegistrations: TournamentRegistration[];
 }

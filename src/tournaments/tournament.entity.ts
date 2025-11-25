@@ -4,8 +4,17 @@ import {
   Column,
   CreateDateColumn,
   ManyToOne,
+  OneToMany,
 } from 'typeorm';
 import { User } from '../users/user.entity';
+import { TournamentRegistration } from './entities/tournament-registration.entity';
+import { Bracket } from './entities/bracket.entity';
+
+export enum TournamentFormat {
+  SINGLE_ELIMINATION = 'single_elimination',
+  DOUBLE_ELIMINATION = 'double_elimination',
+  ROUND_ROBIN = 'round_robin',
+}
 
 @Entity()
 export class Tournament {
@@ -24,6 +33,12 @@ export class Tournament {
   @Column({ default: 16 })
   maxTeams: number;
 
+  @Column({
+    type: 'varchar',
+    default: TournamentFormat.SINGLE_ELIMINATION,
+  })
+  format: string;
+
   @Column({ default: 'upcoming' })
   status: string;
 
@@ -35,4 +50,13 @@ export class Tournament {
 
   @CreateDateColumn()
   createdAt: Date;
+
+  @OneToMany(
+    () => TournamentRegistration,
+    (registration) => registration.tournament,
+  )
+  registrations: TournamentRegistration[];
+
+  @OneToMany(() => Bracket, (bracket) => bracket.tournament)
+  brackets: Bracket[];
 }

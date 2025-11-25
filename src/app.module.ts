@@ -6,6 +6,8 @@ import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { TournamentsModule } from './tournaments/tournaments.module';
 import { TeamsModule } from './teams/teams.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { StatsModule } from './stats/stats.module';
 
 @Module({
   imports: [
@@ -19,6 +21,8 @@ import { TeamsModule } from './teams/teams.module';
     AuthModule,
     TournamentsModule,
     TeamsModule,
+    NotificationsModule,
+    StatsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
