@@ -7,6 +7,7 @@ import { Leaderboard } from './leaderboard.entity';
 import { LeaderboardEntry } from './leaderboard-entry.entity';
 import { User } from '../users/user.entity';
 import { Match } from '../tournaments/entities/match.entity';
+import { Team } from '../teams/team.entity';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { Match } from '../tournaments/entities/match.entity';
       LeaderboardEntry,
       User,
       Match,
+      Team, // ← AÑADIR ESTO
     ]),
   ],
   providers: [StatsService],

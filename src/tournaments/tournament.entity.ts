@@ -27,7 +27,7 @@ export class Tournament {
   @Column()
   game: string;
 
-  @Column()
+  @Column({ type: 'text', default: '' })
   description: string;
 
   @Column({ default: 16 })
@@ -42,7 +42,7 @@ export class Tournament {
   @Column({ default: 'upcoming' })
   status: string;
 
-  @Column()
+  @Column({ type: 'datetime', nullable: true })
   startDate: Date;
 
   @ManyToOne(() => User)

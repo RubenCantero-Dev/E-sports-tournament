@@ -6,6 +6,7 @@ import { Leaderboard, LeaderboardType } from './leaderboard.entity';
 import { LeaderboardEntry } from './leaderboard-entry.entity';
 import { User } from '../users/user.entity';
 import { Match, MatchStatus } from '../tournaments/entities/match.entity';
+import { Team } from '../teams/team.entity';
 
 @Injectable()
 export class StatsService {
@@ -20,6 +21,8 @@ export class StatsService {
     private userRepo: Repository<User>,
     @InjectRepository(Match)
     private matchRepo: Repository<Match>,
+    @InjectRepository(Team)
+    private teamRepo: Repository<Team>,
   ) {}
 
   async getPlayerStats(playerId: number, game?: string): Promise<PlayerStats> {
@@ -34,7 +37,6 @@ export class StatsService {
     });
 
     if (!stats) {
-      // Crear stats por defecto si no existen
       stats = this.playerStatsRepo.create({
         player: { id: playerId },
         game: game || 'general',
@@ -58,82 +60,95 @@ export class StatsService {
       return;
     }
 
-    // Actualizar stats para team1
-    if (match.team1) {
-      await this.updateTeamStats(
-        match.team1.id,
-        match.winner.id === match.team1.id,
-      );
-    }
+    try {
+      // Obtener el torneo para saber el juego
+      const tournament = await this.getTournamentFromMatch(match);
+      const game = tournament?.game || 'Valorant';
 
-    // Actualizar stats para team2
-    if (match.team2) {
-      await this.updateTeamStats(
-        match.team2.id,
-        match.winner.id === match.team2.id,
-      );
+      // Actualizar stats para team1 (usando el capitán)
+      if (match.team1) {
+        const captain = await this.getTeamCaptain(match.team1.id);
+        if (captain) {
+          await this.updateUserStats(
+            captain.id,
+            match.winner.id === match.team1.id,
+            game,
+          );
+        }
+      }
+
+      // Actualizar stats para team2 (usando el capitán)
+      if (match.team2) {
+        const captain = await this.getTeamCaptain(match.team2.id);
+        if (captain) {
+          await this.updateUserStats(
+            captain.id,
+            match.winner.id === match.team2.id,
+            game,
+          );
+        }
+      }
+    } catch (error) {
+      console.error('Error actualizando stats:', error);
+      throw error;
     }
   }
 
-  private async updateTeamStats(
-    teamId: number,
-    isWinner: boolean,
-  ): Promise<void> {
-    // Por simplicidad, actualizamos stats del capitán
-    // En un sistema real, actualizaríamos todos los miembros del equipo
-    const team = await this.userRepo.findOne({
-      where: { id: teamId },
-      relations: ['teams'],
+  private async getTournamentFromMatch(match: Match): Promise<any> {
+    // Obtener el torneo a través del bracket
+    const matchWithBracket = await this.matchRepo.findOne({
+      where: { id: match.id },
+      relations: ['bracket', 'bracket.tournament'],
     });
 
-    if (!team) return;
+    return matchWithBracket?.bracket?.tournament;
+  }
 
-    const game = 'valorant'; // Por ahora hardcodeado
-    let stats = await this.getPlayerStats(team.id, game);
+  private async getTeamCaptain(teamId: number): Promise<User | null> {
+    const team = await this.teamRepo.findOne({
+      where: { id: teamId },
+      relations: ['captain'],
+    });
+
+    return team?.captain || null;
+  }
+
+  private async updateUserStats(
+    userId: number,
+    isWinner: boolean,
+    game: string,
+  ): Promise<void> {
+    let stats = await this.getPlayerStats(userId, game);
 
     stats.totalMatches += 1;
 
     if (isWinner) {
       stats.wins += 1;
-      stats.eloRating += 25; // Ganar ELO
+      stats.eloRating += 25;
     } else {
       stats.losses += 1;
-      stats.eloRating = Math.max(800, stats.eloRating - 15); // Perder ELO (mínimo 800)
+      stats.eloRating = Math.max(800, stats.eloRating - 15);
     }
 
     stats.winRate = (stats.wins / stats.totalMatches) * 100;
 
-    // Simular algunas kills/deaths para el ejemplo
-    stats.kills += Math.floor(Math.random() * 30) + 10;
-    stats.deaths += Math.floor(Math.random() * 20) + 5;
+    stats.kills += Math.floor(Math.random() * 20) + 10;
+    stats.deaths += Math.floor(Math.random() * 15) + 5;
     stats.kdRatio = stats.kills / Math.max(stats.deaths, 1);
 
     await this.playerStatsRepo.save(stats);
-
-    // Actualizar leaderboards
     await this.updateLeaderboards(stats);
   }
 
   async updateLeaderboards(playerStats: PlayerStats): Promise<void> {
-    let leaderboard = await this.leaderboardRepo.findOne({
-      where: { game: playerStats.game, type: LeaderboardType.GLOBAL },
-    });
+    const leaderboard = await this.ensureLeaderboardExists(playerStats.game);
 
-    if (!leaderboard) {
-      leaderboard = this.leaderboardRepo.create({
-        game: playerStats.game,
-        type: LeaderboardType.GLOBAL,
-        isActive: true,
-      });
-      leaderboard = await this.leaderboardRepo.save(leaderboard);
-    }
-
-    // Actualizar o crear entrada en leaderboard
     let entry = await this.leaderboardEntryRepo.findOne({
       where: {
         leaderboard: { id: leaderboard.id },
         player: { id: playerStats.player.id },
       },
+      relations: ['player'],
     });
 
     if (!entry) {
@@ -152,8 +167,6 @@ export class StatsService {
     }
 
     await this.leaderboardEntryRepo.save(entry);
-
-    // Recalcular posiciones
     await this.recalculateLeaderboardPositions(leaderboard.id);
   }
 
@@ -168,6 +181,23 @@ export class StatsService {
       entries[i].position = i + 1;
       await this.leaderboardEntryRepo.save(entries[i]);
     }
+  }
+
+  private async ensureLeaderboardExists(game: string): Promise<Leaderboard> {
+    let leaderboard = await this.leaderboardRepo.findOne({
+      where: { game, type: LeaderboardType.GLOBAL },
+    });
+
+    if (!leaderboard) {
+      leaderboard = this.leaderboardRepo.create({
+        game: game,
+        type: LeaderboardType.GLOBAL,
+        isActive: true,
+      });
+      leaderboard = await this.leaderboardRepo.save(leaderboard);
+    }
+
+    return leaderboard;
   }
 
   async getLeaderboard(
@@ -186,7 +216,7 @@ export class StatsService {
       where: { leaderboard: { id: leaderboard.id } },
       relations: ['player'],
       order: { position: 'ASC' },
-      take: 100, // Top 100
+      take: 100,
     });
   }
 

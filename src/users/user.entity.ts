@@ -5,7 +5,6 @@ import {
   CreateDateColumn,
   OneToMany,
 } from 'typeorm';
-import { Notification } from '../notifications/notification.entity';
 import { PlayerStats } from '../stats/player-stats.entity';
 
 @Entity()
@@ -27,9 +26,6 @@ export class User {
 
   @CreateDateColumn()
   createdAt: Date;
-
-  @OneToMany(() => Notification, (notification) => notification.user)
-  notifications: Notification[];
 
   @OneToMany(() => PlayerStats, (stats) => stats.player)
   stats: PlayerStats[];

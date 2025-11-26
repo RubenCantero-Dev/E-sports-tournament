@@ -1,4 +1,11 @@
-import { Controller, Get, Post, Body, Param } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  ParseIntPipe,
+} from '@nestjs/common';
 import { TournamentsService } from './tournaments.service';
 
 @Controller('tournaments')
@@ -16,7 +23,7 @@ export class TournamentsController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.tournamentsService.findOne(+id);
+  findOne(@Param('id', ParseIntPipe) id: number) {
+    return this.tournamentsService.findOne(id);
   }
 }

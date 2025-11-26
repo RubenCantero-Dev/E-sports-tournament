@@ -1,4 +1,11 @@
-import { Controller, Get, Post, Body, Param } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  ParseIntPipe,
+} from '@nestjs/common';
 import { TeamsService } from './teams.service';
 
 @Controller('teams')
@@ -16,7 +23,7 @@ export class TeamsController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.teamsService.findOne(+id);
+  findOne(@Param('id', ParseIntPipe) id: number) {
+    return this.teamsService.findOne(id);
   }
 }

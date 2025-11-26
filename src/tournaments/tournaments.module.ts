@@ -7,12 +7,12 @@ import { TournamentRegistration } from './entities/tournament-registration.entit
 import { TournamentRegistrationService } from './tournament-registration.service';
 import { TournamentRegistrationController } from './tournament-registration.controller';
 import { Team } from '../teams/team.entity';
-import { NotificationsModule } from '../notifications/notifications.module';
 import { Bracket } from './entities/bracket.entity';
 import { Match } from './entities/match.entity';
 import { BracketsService } from './brackets.service';
 import { BracketsController } from './brackets.controller';
 import { StatsModule } from '../stats/stats.module';
+import { User } from '../users/user.entity';
 
 @Module({
   imports: [
@@ -22,8 +22,8 @@ import { StatsModule } from '../stats/stats.module';
       Team,
       Bracket,
       Match,
+      User,
     ]),
-    NotificationsModule,
     StatsModule,
   ],
   providers: [
@@ -36,5 +36,6 @@ import { StatsModule } from '../stats/stats.module';
     TournamentRegistrationController,
     BracketsController,
   ],
+  exports: [TournamentsService],
 })
 export class TournamentsModule {}

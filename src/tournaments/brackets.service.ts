@@ -25,9 +25,32 @@ export class BracketsService {
   ) {}
 
   async generateBracket(tournamentId: number): Promise<Bracket[]> {
+    // Verificar si ya existe un bracket para este torneo
+    const existingBrackets = await this.bracketRepo.find({
+      where: { tournament: { id: tournamentId } },
+      relations: ['matches', 'matches.team1', 'matches.team2'],
+    });
+
+    // Si ya existe un bracket con partidas, retornarlo
+    if (
+      existingBrackets.length > 0 &&
+      existingBrackets.some((b) => b.matches.length > 0)
+    ) {
+      return existingBrackets;
+    }
+
+    // Si existe un bracket vacío, eliminarlo
+    if (existingBrackets.length > 0) {
+      await this.bracketRepo.remove(existingBrackets);
+    }
+
     const tournament = await this.tournamentRepo.findOne({
       where: { id: tournamentId },
-      relations: ['registrations', 'registrations.team'],
+      relations: [
+        'registrations',
+        'registrations.team',
+        'registrations.team.captain',
+      ],
     });
 
     if (!tournament) {
@@ -47,7 +70,7 @@ export class BracketsService {
 
     const brackets: Bracket[] = [];
 
-    // Generar bracket principal (eliminación simple)
+    // Generar bracket principal
     const mainBracket = this.bracketRepo.create({
       tournament: { id: tournamentId },
       name: 'Main Bracket',
@@ -71,7 +94,7 @@ export class BracketsService {
     const matches: Match[] = [];
     let matchNumber = 1;
 
-    // Mezclar equipos aleatoriamente para el emparejamiento
+    // Mezclar equipos aleatoriamente
     const shuffledTeams = [...teams].sort(() => Math.random() - 0.5);
 
     for (let i = 0; i < shuffledTeams.length; i += 2) {
@@ -119,7 +142,7 @@ export class BracketsService {
   ): Promise<Match> {
     const match = await this.matchRepo.findOne({
       where: { id: matchId },
-      relations: ['bracket', 'team1', 'team2'],
+      relations: ['bracket', 'team1', 'team2', 'bracket.tournament'],
     });
 
     if (!match) {
@@ -141,19 +164,16 @@ export class BracketsService {
 
     const updatedMatch = await this.matchRepo.save(match);
 
-    // Actualizar estadísticas basadas en el resultado
+    // Actualizar estadísticas
     await this.statsService.updatePlayerStatsFromMatch(updatedMatch);
 
     // Generar siguiente ronda si es necesario
-    await this.generateNextRound(match.bracket.id, updatedMatch);
+    await this.generateNextRoundIfNeeded(match.bracket.id);
 
     return updatedMatch;
   }
 
-  private async generateNextRound(
-    bracketId: number,
-    completedMatch: Match,
-  ): Promise<void> {
+  private async generateNextRoundIfNeeded(bracketId: number): Promise<void> {
     const bracket = await this.bracketRepo.findOne({
       where: { id: bracketId },
       relations: [
@@ -161,46 +181,137 @@ export class BracketsService {
         'matches.team1',
         'matches.team2',
         'matches.winner',
+        'tournament',
       ],
     });
 
-    if (!bracket) return;
+    if (!bracket || !bracket.tournament) {
+      console.log('Bracket o tournament no encontrado');
+      return;
+    }
+
+    // Obtener todas las partidas de esta ronda
+    const currentRoundMatches = bracket.matches.filter(
+      (match) => match.bracket?.id === bracketId,
+    );
 
     // Verificar si todas las partidas de esta ronda están completas
-    const currentRoundMatches = bracket.matches.filter(
-      (m) =>
-        m.matchNumber === completedMatch.matchNumber ||
-        Math.ceil(m.matchNumber / 2) ===
-          Math.ceil(completedMatch.matchNumber / 2),
-    );
-
     const allMatchesCompleted = currentRoundMatches.every(
-      (m) => m.status === MatchStatus.COMPLETED,
+      (match) => match.status === MatchStatus.COMPLETED,
     );
 
-    if (allMatchesCompleted && currentRoundMatches.length > 1) {
-      await this.createNextRoundMatches(bracketId, currentRoundMatches);
+    if (!allMatchesCompleted) {
+      return;
     }
+
+    // Obtener ganadores de esta ronda
+    const winners = currentRoundMatches
+      .map((match) => match.winner)
+      .filter((winner) => winner !== null);
+
+    if (winners.length <= 1) {
+      if (winners.length === 1) {
+        await this.finalizeTournament(bracket.tournament.id, winners[0]);
+      }
+      return;
+    }
+
+    // Crear siguiente ronda
+    const nextRoundNumber = bracket.round + 1;
+
+    let nextBracket = await this.bracketRepo.findOne({
+      where: {
+        tournament: { id: bracket.tournament.id },
+        round: nextRoundNumber,
+      },
+    });
+
+    if (!nextBracket) {
+      nextBracket = this.bracketRepo.create({
+        tournament: { id: bracket.tournament.id },
+        name: `Round ${nextRoundNumber}`,
+        round: nextRoundNumber,
+        status: 'upcoming',
+      });
+      nextBracket = await this.bracketRepo.save(nextBracket);
+    }
+
+    await this.generateMatchesForRound(
+      nextBracket.id,
+      winners,
+      nextRoundNumber,
+    );
   }
 
-  private async createNextRoundMatches(
+  private async generateMatchesForRound(
     bracketId: number,
-    completedMatches: Match[],
+    teams: any[],
+    roundNumber: number,
   ): Promise<void> {
-    const winners = completedMatches
-      .map((match) => match.winner)
-      .filter((winner) => winner);
+    const matches: Match[] = [];
+    let matchNumber = 1;
 
-    if (winners.length >= 2) {
-      const nextRoundMatch = this.matchRepo.create({
-        bracket: { id: bracketId },
-        matchNumber: Math.ceil(completedMatches[0].matchNumber / 2),
-        team1: winners[0],
-        team2: winners[1],
-        status: MatchStatus.SCHEDULED,
-      });
+    // Para semifinales y finales, emparejar equipos en orden
+    for (let i = 0; i < teams.length; i += 2) {
+      if (i + 1 < teams.length) {
+        const match = this.matchRepo.create({
+          bracket: { id: bracketId },
+          matchNumber: matchNumber++,
+          team1: teams[i],
+          team2: teams[i + 1],
+          status: MatchStatus.SCHEDULED,
+        });
+        matches.push(match);
+      } else {
+        // En caso de número impar, el último equipo pasa directo
+        const match = this.matchRepo.create({
+          bracket: { id: bracketId },
+          matchNumber: matchNumber++,
+          team1: teams[i],
+          status: MatchStatus.SCHEDULED,
+        });
+        matches.push(match);
+      }
+    }
 
-      await this.matchRepo.save(nextRoundMatch);
+    await this.matchRepo.save(matches);
+  }
+
+  private async finalizeTournament(
+    tournamentId: number,
+    champion: any,
+  ): Promise<void> {
+    await this.tournamentRepo.update(tournamentId, {
+      status: 'completed',
+    });
+
+    console.log(
+      `🎉 ¡Torneo ${tournamentId} completado! Campeón: ${champion.name}`,
+    );
+  }
+
+  async getAllMatches(): Promise<Match[]> {
+    return await this.matchRepo.find({
+      relations: ['bracket', 'bracket.tournament', 'team1', 'team2', 'winner'],
+      order: { bracket: { tournament: { id: 'ASC' } }, matchNumber: 'ASC' },
+    });
+  }
+
+  // Método para limpiar brackets duplicados (solo para administración)
+  async cleanupDuplicateBrackets(tournamentId: number): Promise<void> {
+    const brackets = await this.bracketRepo.find({
+      where: { tournament: { id: tournamentId } },
+      relations: ['matches'],
+      order: { createdAt: 'DESC', id: 'DESC' },
+    });
+
+    if (brackets.length > 1) {
+      // Mantener el bracket más reciente, eliminar los demás
+      const [bracketToKeep, ...bracketsToDelete] = brackets;
+
+      if (bracketsToDelete.length > 0) {
+        await this.bracketRepo.remove(bracketsToDelete);
+      }
     }
   }
 }
